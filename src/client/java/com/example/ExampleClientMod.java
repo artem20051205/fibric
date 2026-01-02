@@ -19,7 +19,6 @@ public class ExampleClientMod implements ClientModInitializer {
 
 	@Override
 	public void onInitializeClient() {
-
 		ClientReceiveMessageEvents.CHAT.register((message, signedMessage, sender, params, receptionTimestamp) -> {
 			String text = message.getString();
 
