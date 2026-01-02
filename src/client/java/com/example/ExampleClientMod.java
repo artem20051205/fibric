@@ -11,6 +11,7 @@ import java.io.OutputStream;
 import java.net.HttpURLConnection;
 import java.net.URL;
 import java.nio.charset.StandardCharsets;
+import java.util.UUID;
 
 public class ExampleClientMod implements ClientModInitializer {
 
@@ -19,27 +20,30 @@ public class ExampleClientMod implements ClientModInitializer {
 
 	@Override
 	public void onInitializeClient() {
-		ClientReceiveMessageEvents.CHAT.register((message, signedMessage, sender, params, receptionTimestamp) -> {
+		ClientReceiveMessageEvents.CHAT.register((message, signedMessage, senderProfile, params, ts) -> {
+			MinecraftClient client = MinecraftClient.getInstance();
+			if (client.player == null) return;
+
 			String text = message.getString();
 
-			// Пример фильтра: отвечать только если написали "Player677" (замени на свой ник)
-			if (!text.contains("Player677")) return;
-
-			// Чтобы не отвечать на свои же сообщения (грубый вариант)
-			if (text.startsWith("<Player677>")) return;
+			// не отвечать самому себе (по UUID отправителя)
+			if (senderProfile != null) {
+				UUID senderId = senderProfile.id();
+				if (senderId != null && senderId.equals(client.player.getUuid())) return;
+			}
 
 			new Thread(() -> {
 				String answer = askOllama(text);
 				if (answer == null || answer.isEmpty()) return;
 
-				// чуть чистим/ограничиваем длину
-				answer = answer.replace("\n", " ");
-				if (answer.length() > 200) answer = answer.substring(0, 200);
+				answer = answer.replace("\n", " ").replace("\r", " ");
+				if (answer.length() > 180) answer = answer.substring(0, 180);
 
-				MinecraftClient client = MinecraftClient.getInstance();
+				String finalAnswer = answer;
+
 				client.execute(() -> {
 					if (client.player != null) {
-						client.player.networkHandler.sendChatMessage("AI: " + answer);
+						client.player.networkHandler.sendChatMessage("AI: " + finalAnswer);
 					}
 				});
 			}).start();
@@ -59,16 +63,19 @@ public class ExampleClientMod implements ClientModInitializer {
 			body.addProperty("prompt", prompt);
 			body.addProperty("stream", false);
 
-			byte[] out = body.toString().getBytes(StandardCharsets.UTF_8);
 			try (OutputStream os = con.getOutputStream()) {
-				os.write(out);
+				os.write(body.toString().getBytes(StandardCharsets.UTF_8));
 			}
 
-			InputStream is = con.getResponseCode() < 300 ? con.getInputStream() : con.getErrorStream();
-			String text = new String(is.readAllBytes(), StandardCharsets.UTF_8);
+			InputStream is = (con.getResponseCode() < 300)
+					? con.getInputStream()
+					: con.getErrorStream();
 
+			String text = new String(is.readAllBytes(), StandardCharsets.UTF_8);
 			JsonObject json = JsonParser.parseString(text).getAsJsonObject();
-			return json.has("response") ? json.get("response").getAsString() : text;
+
+			if (json.has("response")) return json.get("response").getAsString();
+			return null;
 		} catch (Exception e) {
 			return null;
 		}
